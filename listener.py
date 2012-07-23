@@ -2,7 +2,7 @@
 # initialize the blogs list
 
 # the file is opened with write mode in order to lock out any writers
-with open('data/blogs.txt', 'r') as f:
+with open('data/blogs.txt', 'rwa') as f:
     urls = [line.strip().split(' ') for line in f.xreadlines()]
 
 ###############################################################################
@@ -110,6 +110,9 @@ if __name__ == '__main__':
         while True:
             time.sleep(1000)
     except KeyboardInterrupt:
+        # the first print swallows the ^C that gets printed on most consoles
+        print
+        print 'Stopping all threads...'
         for b in blogs:
             blogs[b].kill_now()
 
