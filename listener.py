@@ -6,11 +6,7 @@ with open('data/blogs.txt', 'r') as f:
     urls = [line.strip().split(' ') for line in f.xreadlines()]
 
 ###############################################################################
-# the blog grabber class
-
-import threading
-import feedparser
-import time
+# methods for handling and merging data
 
 def merge_data(old_data, new_data, key=lambda a:a):
     '''
@@ -48,6 +44,12 @@ def merge_data(old_data, new_data, key=lambda a:a):
             break
     return ret
 
+###############################################################################
+# the blog grabber class
+
+import threading
+import feedparser
+import time
 import random
 from termcolor import colored
 
@@ -58,8 +60,13 @@ class Blog(threading.Thread):
         self.entries = []
         self.last_data = None
         self.name = name
+
+        # fields used for synchronization and CTRL-C interruption support
+        self.wake_lock = threading.Condition()
+        self.should_kill = False
     def run(self):
         while True:
+            self.wake_lock.acquire()
             print 'fetching data'
             data = feedparser.parse(self.url)
             # if there is any new data, perform a merge and save the current
@@ -69,12 +76,24 @@ class Blog(threading.Thread):
                 self.entries = merge_data(self.entries, data['entries'],
                                           key=lambda e: e['published_parsed'])
                 self.last_data = data
-            time.sleep(60 + random.randint(0, 60))
+            self.wake_lock.wait(timeout=60 + random.randint(0, 60))
+            if self.should_kill:
+                print 'killing thread', colored(self.name, 'red')
+                return
+            self.wake_lock.release()
+    def kill_now(self):
+        '''
+        Tell the process that it's time to write data back and die
+        '''
+        self.wake_lock.acquire()
+        self.should_kill = True
+        self.wake_lock.notify_all()
+        self.wake_lock.release()
     def data_is_new(self, new_data):
         return self.last_data['entries'] != new_data['entries']
 
 ###############################################################################
-# 
+# main stuff
 
 if __name__ == '__main__':
     # line format is (url, name)
@@ -86,6 +105,13 @@ if __name__ == '__main__':
         blog = Blog(url, name)
         blogs[url] = blog
         blog.start()
+
+    try:
+        while True:
+            time.sleep(1000)
+    except KeyboardInterrupt:
+        for b in blogs:
+            blogs[b].kill_now()
 
     '''
     import descend_json
