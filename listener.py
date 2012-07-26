@@ -51,7 +51,14 @@ import threading
 import feedparser
 import time
 import random
+import atexit
+import pickle
+import copy
+
 from termcolor import colored
+
+def make_blog_filename(url, name):
+    return 'url:'+url.replace('/', 'slash')+'-name:'+name
 
 class Blog(threading.Thread):
     def __init__(self, url, name):
@@ -78,7 +85,7 @@ class Blog(threading.Thread):
                 self.last_data = data
             self.wake_lock.wait(timeout=60 + random.randint(0, 60))
             if self.should_kill:
-                print 'killing thread', colored(self.name, 'red')
+                print 'killing thread', colored(self.name, 'blue')
                 return
             self.wake_lock.release()
     def kill_now(self):
@@ -91,18 +98,51 @@ class Blog(threading.Thread):
         self.wake_lock.release()
     def data_is_new(self, new_data):
         return self.last_data['entries'] != new_data['entries']
+    def __getstate__(self):
+        return {
+            'url':self.url,
+            'entries':self.entries,
+            'last_data':self.last_data,
+            'name':self.name,
+        }
+    def __setstate__(self, state):
+        threading.Thread.__init__(self)
+        self.wake_lock = threading.Condition()
+        self.should_kill = False
+
+        self.url = state['url']
+        self.entries = state['entries']
+        self.last_data = state['last_data']
+        self.name = state['name']
+    def write_back(self):
+        filename=make_blog_filename(self.url, self.name)
+        # TODO: turn this into a os.path.join
+        with open('data/saved_progress/'+filename, 'w') as f:
+            pickle.dump(self, f)
+
+import atexit
+
+def get_blog(url, name):
+    try:
+        with open('data/saved_progress/'+make_blog_filename(url, name)) as f:
+            print 'Loading blog thread for', colored(name, 'blue')
+            blog = pickle.load(f)
+    except IOError:
+        print 'Creating new blog thread for', colored(name, 'red')
+        blog = Blog(url, name)
+    atexit.register(blog.write_back)
+    return blog
 
 ###############################################################################
 # main stuff
 
 if __name__ == '__main__':
     # line format is (url, name)
-    print urls
     blogs = {}
     for item in urls:
         url = item[0]
         name = item[1]
-        blog = Blog(url, name)
+        blog = get_blog(url, name)
         blogs[url] = blog
         blog.start()
 
